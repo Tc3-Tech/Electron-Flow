@@ -10,19 +10,24 @@
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        function MaterialFlow() {
-            const [material, setMaterial] = React.useState('copper');
-            const [isFlowing, setIsFlowing] = React.useState(false);
-            const [atoms, setAtoms] = React.useState([]);
-            const [electrons, setElectrons] = React.useState([]);
+        const { useState, useEffect, useRef } = React;
+        const MaterialFlow = () => {
+            const [isFlowing, setIsFlowing] = useState(false);
+            const [atoms, setAtoms] = useState([]);
+            const [electrons, setElectrons] = useState([]);
+            const [rubberLines, setRubberLines] = useState([]);
+            const [isDrawing, setIsDrawing] = useState(false);
+            const [currentLine, setCurrentLine] = useState(null);
+            const canvasRef = useRef(null);
 
-            const materials = {
-                copper: { electrons: 5, color: 'bg-amber-600', freeElectronCount: 40, speed: 2 },
-                aluminum: { electrons: 3, color: 'bg-gray-400', freeElectronCount: 25, speed: 1.5 },
-                rubber: { electrons: 4, color: 'bg-gray-800', freeElectronCount: 0, speed: 0 }
+            const material = {
+                electrons: 5,
+                color: 'bg-amber-600',
+                freeElectronCount: 40,
+                speed: 2
             };
 
-            React.useEffect(() => {
+            useEffect(() => {
                 const newAtoms = [];
                 for(let r = 0; r < 5; r++) {
                     for(let c = 0; c < 8; c++) {
@@ -35,12 +40,12 @@
                     }
                 }
                 setAtoms(newAtoms);
-            }, [material]);
+            }, []);
 
-            React.useEffect(() => {
+            useEffect(() => {
                 if (isFlowing) {
                     const leftAtoms = atoms.filter(a => a.x < 100);
-                    const newElectrons = Array(materials[material].freeElectronCount)
+                    const newElectrons = Array(material.freeElectronCount)
                         .fill(0)
                         .map((_, i) => ({
                             id: i,
@@ -51,13 +56,54 @@
                 } else {
                     setElectrons([]);
                 }
-            }, [isFlowing, material, atoms]);
+            }, [isFlowing, atoms]);
 
-            React.useEffect(() => {
-                if (isFlowing && material !== 'rubber') {
+            const lineIntersects = (line, point) => {
+                if (!line || !point) return false;
+                const buffer = 5;
+                const x1 = line.start.x;
+                const y1 = line.start.y;
+                const x2 = line.end.x;
+                const y2 = line.end.y;
+                const px = point.x;
+                const py = point.y;
+                
+                const d = Math.abs(
+                    ((x2 - x1) * (y1 - py) - (x1 - px) * (y2 - y1)) /
+                    Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                );
+                
+                return d < buffer &&
+                       px >= Math.min(x1, x2) - buffer &&
+                       px <= Math.max(x1, x2) + buffer &&
+                       py >= Math.min(y1, y2) - buffer &&
+                       py <= Math.max(y1, y2) + buffer;
+            };
+
+            useEffect(() => {
+                if (isFlowing) {
                     const interval = setInterval(() => {
                         setElectrons(prevElectrons => 
                             prevElectrons.map(electron => {
+                                const point = {
+                                    x: electron.x + 32,
+                                    y: electron.y + 32
+                                };
+
+                                const intersectsRubber = rubberLines.some(line => 
+                                    lineIntersects(line, point)
+                                );
+
+                                if (intersectsRubber) {
+                                    const leftAtoms = atoms.filter(a => a.x < 100);
+                                    const startAtom = leftAtoms[Math.floor(Math.random() * leftAtoms.length)];
+                                    return {
+                                        ...electron,
+                                        x: startAtom.x,
+                                        y: startAtom.y
+                                    };
+                                }
+
                                 const jitterAmount = 3;
                                 if (electron.x > 600) {
                                     const leftAtoms = atoms.filter(a => a.x < 100);
@@ -70,22 +116,50 @@
                                 }
                                 return {
                                     ...electron,
-                                    x: electron.x + materials[material].speed,
-                                    y: electron.y + (Math.random() - 0.5) * jitterAmount * materials[material].speed
+                                    x: electron.x + material.speed,
+                                    y: electron.y + (Math.random() - 0.5) * jitterAmount * material.speed
                                 };
                             })
                         );
                     }, 16);
                     return () => clearInterval(interval);
                 }
-            }, [isFlowing, material, atoms]);
+            }, [isFlowing, atoms, rubberLines]);
+
+            const getCoordinates = (e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                return {
+                    x: e.clientX - rect.left + e.currentTarget.scrollLeft,
+                    y: e.clientY - rect.top + e.currentTarget.scrollTop
+                };
+            };
+
+            const handleMouseDown = (e) => {
+                const coords = getCoordinates(e);
+                setIsDrawing(true);
+                setCurrentLine({ start: coords, end: coords });
+            };
+
+            const handleMouseMove = (e) => {
+                if (!isDrawing || !currentLine) return;
+                const coords = getCoordinates(e);
+                setCurrentLine(prev => ({ ...prev, end: coords }));
+            };
+
+            const handleMouseUp = () => {
+                if (currentLine) {
+                    setRubberLines(prev => [...prev, currentLine]);
+                }
+                setIsDrawing(false);
+                setCurrentLine(null);
+            };
 
             function Atom({ x, y }) {
                 return (
                     <div className="absolute w-16 h-16" style={{ left: `${x}px`, top: `${y}px` }}>
-                        <div className={`absolute w-8 h-8 ${materials[material].color} rounded-full left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2`} />
-                        {Array(materials[material].electrons).fill(0).map((_, i) => {
-                            const angle = (2 * Math.PI * i) / materials[material].electrons;
+                        <div className={`absolute w-8 h-8 ${material.color} rounded-full left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2`} />
+                        {Array(material.electrons).fill(0).map((_, i) => {
+                            const angle = (2 * Math.PI * i) / material.electrons;
                             return (
                                 <div
                                     key={i}
@@ -105,26 +179,28 @@
             return (
                 <div className="w-full max-w-6xl mx-auto p-6">
                     <div className="flex gap-4 mb-6">
-                        {Object.entries(materials).map(([key]) => (
-                            <button
-                                key={key}
-                                onClick={() => setMaterial(key)}
-                                className={`px-4 py-2 rounded ${
-                                    material === key ? 'ring-2 ring-blue-500' : ''
-                                } ${key !== 'rubber' ? 'bg-green-100' : 'bg-red-100'}`}
-                            >
-                                {key}
-                            </button>
-                        ))}
                         <button
                             onClick={() => setIsFlowing(!isFlowing)}
                             className={`px-4 py-2 ${isFlowing ? 'bg-red-500' : 'bg-green-500'} text-white rounded`}
                         >
                             {isFlowing ? 'Stop' : 'Start'} Flow
                         </button>
+                        <button
+                            onClick={() => setRubberLines([])}
+                            className="px-4 py-2 bg-gray-500 text-white rounded"
+                        >
+                            Clear Insulation
+                        </button>
                     </div>
 
-                    <div className="relative h-[500px] bg-gray-50 rounded-xl overflow-hidden">
+                    <div 
+                        ref={canvasRef}
+                        className="relative h-[500px] bg-gray-50 rounded-xl overflow-hidden cursor-crosshair"
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
+                        onMouseLeave={handleMouseUp}
+                    >
                         {atoms.map(atom => (
                             <Atom key={atom.id} x={atom.x} y={atom.y} />
                         ))}
@@ -139,10 +215,37 @@
                                 }}
                             />
                         ))}
+                        <svg className="absolute inset-0 pointer-events-none">
+                            {rubberLines.map((line, i) => (
+                                <line
+                                    key={i}
+                                    x1={line.start.x}
+                                    y1={line.start.y}
+                                    x2={line.end.x}
+                                    y2={line.end.y}
+                                    stroke="#4a5568"
+                                    strokeWidth="8"
+                                    strokeLinecap="round"
+                                    className="opacity-75"
+                                />
+                            ))}
+                            {currentLine && (
+                                <line
+                                    x1={currentLine.start.x}
+                                    y1={currentLine.start.y}
+                                    x2={currentLine.end.x}
+                                    y2={currentLine.end.y}
+                                    stroke="#4a5568"
+                                    strokeWidth="8"
+                                    strokeLinecap="round"
+                                    className="opacity-75"
+                                />
+                            )}
+                        </svg>
                     </div>
                 </div>
             );
-        }
+        };
 
         ReactDOM.render(<MaterialFlow />, document.getElementById('root'));
     </script>
